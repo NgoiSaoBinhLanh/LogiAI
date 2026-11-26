@@ -1,0 +1,601 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// ENUMS CHUẨN HÓA POSTGRESQL
+// ==========================================
+
+enum EntityStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+  SUSPENDED
+}
+
+enum BranchType {
+  HUB
+  SATELLITE
+  STORE
+}
+
+enum BinStatus {
+  ACTIVE
+  FULL
+  MAINTENANCE
+  LOCKED
+}
+
+enum TicketType {
+  IMPORT
+  EXPORT
+  ADJUSTMENT
+}
+
+enum TicketStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  COMPLETED
+  CANCELLED
+}
+
+enum TransferStatus {
+  PENDING
+  APPROVED
+  IN_TRANSIT
+  RECEIVED
+  DISCREPANCY
+  CANCELLED
+}
+
+enum StockCheckStatus {
+  COUNTING
+  PENDING_APPROVAL
+  APPROVED
+  CANCELLED
+}
+
+enum OrderStatus {
+  NEW
+  ALLOCATED
+  PACKING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum AuditActionType {
+  CREATE
+  UPDATE
+  DELETE
+  APPROVE
+  REJECT
+  LOGIN
+  LOGOUT
+  REVOKE_TOKEN
+  PERMISSION_CHANGE
+}
+
+enum AlertType {
+  LOW_STOCK
+  EXPIRING_SOON
+  SLA_BREACH
+  AI_TRANSFER_SUGGESTION
+  CAPACITY_WARNING
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// ==========================================
+// PHÂN HỆ PHÂN QUYỀN ĐỘNG (RBAC) & PHIÊN
+// ==========================================
+
+model Role {
+  id                BigInt   @id @default(autoincrement())
+  roleCode          String   @unique @map("role_code") @db.VarChar(50)
+  roleName          String   @map("role_name") @db.VarChar(100)
+  description       String?  @db.VarChar(255)
+  permissionVersion Int      @default(1) @map("permission_version")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  users           User[]           @relation("PrimaryRole")
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@map("role")
+}
+
+model Permission {
+  id          BigInt   @id @default(autoincrement())
+  code        String   @unique @db.VarChar(100)
+  name        String   @db.VarChar(150)
+  module      String   @db.VarChar(80)
+  description String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  rolePermissions RolePermission[]
+
+  @@index([module])
+  @@map("permission")
+}
+
+model RolePermission {
+  id           BigInt   @id @default(autoincrement())
+  roleId       BigInt   @map("role_id")
+  permissionId BigInt   @map("permission_id")
+  assignedAt   DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permission")
+}
+
+model UserRole {
+  id         BigInt   @id @default(autoincrement())
+  userId     BigInt   @map("user_id")
+  roleId     BigInt   @map("role_id")
+  assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+  @@map("user_role")
+}
+
+model RefreshToken {
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt    @map("user_id")
+  tokenHash String    @unique @map("token_hash") @db.VarChar(255)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  isRevoked Boolean   @default(false) @map("is_revoked")
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  ipAddress String?   @map("ip_address") @db.VarChar(45)
+  userAgent String?   @map("user_agent") @db.VarChar(500)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRevoked])
+  @@index([expiresAt])
+  @@map("refresh_token")
+}
+
+// ==========================================
+// PHÂN HỆ CHI NHÁNH, KHO BÃI & NHÂN SỰ
+// ==========================================
+
+model Branch {
+  id           BigInt       @id @default(autoincrement())
+  code         String       @unique @db.VarChar(50)
+  name         String       @db.VarChar(255)
+  branchType   BranchType   @default(SATELLITE) @map("branch_type")
+  address      String       @db.VarChar(500)
+  latitude     Decimal      @db.Decimal(10, 8)
+  longitude    Decimal      @db.Decimal(11, 8)
+  capacity     Decimal      @db.Decimal(10, 2)
+  managerPhone String?      @map("manager_phone") @db.VarChar(20)
+  status       EntityStatus @default(ACTIVE)
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  users             User[]
+  zones             Zone[]
+  stocks            Stock[]
+  inventoryTickets  InventoryTicket[]
+  outgoingTransfers TransferTicket[]  @relation("SourceBranch")
+  incomingTransfers TransferTicket[]  @relation("DestBranch")
+  stockChecks       StockCheck[]
+  customerOrders    CustomerOrder[]
+  aiAlerts          AiAlert[]
+
+  @@index([status])
+  @@map("branch")
+}
+
+model User {
+  id                  BigInt       @id @default(autoincrement())
+  username            String       @unique @db.VarChar(100)
+  email               String       @unique @db.VarChar(255)
+  password            String       @db.VarChar(255)
+  fullName            String       @map("full_name") @db.VarChar(150)
+  phone               String       @db.VarChar(20)
+  branchId            BigInt?      @map("branch_id")
+  roleId              BigInt       @map("role_id")
+  status              EntityStatus @default(ACTIVE)
+  permissionVersion   Int          @default(1) @map("permission_version")
+  failedLoginAttempts Int          @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime?    @map("locked_until") @db.Timestamptz(6)
+  createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branch                   Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  role                     Role              @relation("PrimaryRole", fields: [roleId], references: [id], onDelete: Restrict)
+  userRoles                UserRole[]
+  refreshTokens            RefreshToken[]
+  createdInventoryTickets  InventoryTicket[] @relation("InventoryCreator")
+  approvedInventoryTickets InventoryTicket[] @relation("InventoryApprover")
+  createdTransfers         TransferTicket[]  @relation("TransferCreator")
+  approvedTransfers        TransferTicket[]  @relation("TransferApprover")
+  createdStockChecks       StockCheck[]      @relation("StockCheckCreator")
+  approvedStockChecks      StockCheck[]      @relation("StockCheckApprover")
+  auditLogs                SystemAuditLog[]
+  resolvedAlerts           AiAlert[]
+
+  @@index([branchId, status])
+  @@index([roleId])
+  @@map("user")
+}
+
+model Zone {
+  id        BigInt   @id @default(autoincrement())
+  branchId  BigInt   @map("branch_id")
+  code      String   @db.VarChar(50)
+  name      String   @db.VarChar(150)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  bins   Bin[]
+
+  @@unique([branchId, code])
+  @@index([branchId])
+  @@map("zone")
+}
+
+model Bin {
+  id          BigInt    @id @default(autoincrement())
+  zoneId      BigInt    @map("zone_id")
+  code        String    @db.VarChar(50)
+  maxCapacity Decimal   @map("max_capacity") @db.Decimal(10, 2)
+  status      BinStatus @default(ACTIVE)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  zone                   Zone                    @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  stocks                 Stock[]
+  inventoryTicketDetails InventoryTicketDetail[]
+  stockCheckDetails      StockCheckDetail[]
+
+  @@unique([zoneId, code])
+  @@index([zoneId])
+  @@map("bin")
+}
+
+// ==========================================
+// PHÂN HỆ DANH MỤC, SẢN PHẨM & TỒN KHO
+// ==========================================
+
+model Category {
+  id          BigInt   @id @default(autoincrement())
+  code        String   @unique @db.VarChar(50)
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  products Product[]
+
+  @@map("category")
+}
+
+model Product {
+  id               BigInt   @id @default(autoincrement())
+  sku              String   @unique @db.VarChar(100)
+  barcode          String   @unique @db.VarChar(100)
+  name             String   @db.VarChar(255)
+  categoryId       BigInt   @map("category_id")
+  unit             String   @db.VarChar(50)
+  unitPrice        Decimal  @default(0) @map("unit_price") @db.Decimal(15, 2)
+  costPrice        Decimal  @default(0) @map("cost_price") @db.Decimal(15, 2)
+  weight           Decimal? @db.Decimal(10, 2)
+  dimensions       String?  @db.VarChar(100)
+  storageCondition String?  @map("storage_condition") @db.VarChar(255)
+  minStock         Int      @default(0) @map("min_stock")
+  maxStock         Int      @default(0) @map("max_stock")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  category               Category                @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  stocks                 Stock[]
+  inventoryTicketDetails InventoryTicketDetail[]
+  transferTicketDetails  TransferTicketDetail[]
+  stockCheckDetails      StockCheckDetail[]
+  customerOrderDetails   CustomerOrderDetail[]
+  aiAlerts               AiAlert[]
+
+  @@index([categoryId])
+  @@index([name])
+  @@map("product")
+}
+
+model Stock {
+  id          BigInt    @id @default(autoincrement())
+  branchId    BigInt    @map("branch_id")
+  productId   BigInt    @map("product_id")
+  binId       BigInt    @map("bin_id")
+  batchNo     String    @map("batch_no") @db.VarChar(100)
+  expDate     DateTime? @map("exp_date") @db.Date
+  qtyOnHand   Int       @default(0) @map("qty_on_hand")
+  qtyReserved Int       @default(0) @map("qty_reserved")
+  isLocked    Boolean   @default(false) @map("is_locked")
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  bin     Bin     @relation(fields: [binId], references: [id], onDelete: Restrict)
+
+  @@unique([branchId, productId, binId, batchNo])
+  @@index([branchId, productId])
+  @@index([productId, batchNo])
+  @@index([expDate])
+  @@index([binId])
+  @@map("stock")
+}
+
+// ==========================================
+// PHÂN HỆ CHỨNG TỪ KHO, ĐIỀU CHUYỂN & KIỂM KÊ
+// ==========================================
+
+model InventoryTicket {
+  id           BigInt       @id @default(autoincrement())
+  code         String       @unique @db.VarChar(50)
+  type         TicketType
+  branchId     BigInt       @map("branch_id")
+  status       TicketStatus @default(DRAFT)
+  createdBy    BigInt       @map("created_by")
+  approvedBy   BigInt?      @map("approved_by")
+  supplierName String?      @map("supplier_name") @db.VarChar(255)
+  reason       String?      @db.VarChar(255)
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branch   Branch                  @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  creator  User                    @relation("InventoryCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  approver User?                   @relation("InventoryApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
+  details  InventoryTicketDetail[]
+
+  @@index([branchId, status, createdAt])
+  @@index([type, status])
+  @@map("inventory_ticket")
+}
+
+model InventoryTicketDetail {
+  id        BigInt    @id @default(autoincrement())
+  ticketId  BigInt    @map("ticket_id")
+  productId BigInt    @map("product_id")
+  binId     BigInt    @map("bin_id")
+  batchNo   String    @default("DEFAULT") @map("batch_no") @db.VarChar(100)
+  expDate   DateTime? @map("exp_date") @db.Date
+  qty       Int
+
+  ticket  InventoryTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  bin     Bin             @relation(fields: [binId], references: [id], onDelete: Restrict)
+
+  @@index([ticketId])
+  @@index([productId])
+  @@map("inventory_ticket_detail")
+}
+
+model TransferTicket {
+  id              BigInt         @id @default(autoincrement())
+  code            String         @unique @db.VarChar(50)
+  sourceBranchId  BigInt         @map("source_branch_id")
+  destBranchId    BigInt         @map("dest_branch_id")
+  status          TransferStatus @default(PENDING)
+  createdBy       BigInt         @map("created_by")
+  approvedBy      BigInt?        @map("approved_by")
+  transportMethod String?        @map("transport_method") @db.VarChar(100)
+  driverName      String?        @map("driver_name") @db.VarChar(150)
+  driverPhone     String?        @map("driver_phone") @db.VarChar(20)
+  vehiclePlate    String?        @map("vehicle_plate") @db.VarChar(30)
+  temperatureC    Decimal?       @map("temperature_c") @db.Decimal(5, 2)
+  eta             DateTime?      @db.Timestamptz(6)
+  slaDeadline     DateTime?      @map("sla_deadline") @db.Timestamptz(6)
+  dispatchedAt    DateTime?      @map("dispatched_at") @db.Timestamptz(6)
+  receivedAt      DateTime?      @map("received_at") @db.Timestamptz(6)
+  currentLat      Decimal?       @map("current_lat") @db.Decimal(10, 8)
+  currentLng      Decimal?       @map("current_lng") @db.Decimal(11, 8)
+  aiSuggested     Boolean        @default(false) @map("ai_suggested")
+  aiConfidence    Decimal?       @map("ai_confidence") @db.Decimal(5, 2)
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sourceBranch Branch                 @relation("SourceBranch", fields: [sourceBranchId], references: [id], onDelete: Restrict)
+  destBranch   Branch                 @relation("DestBranch", fields: [destBranchId], references: [id], onDelete: Restrict)
+  creator      User                   @relation("TransferCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  approver     User?                  @relation("TransferApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
+  details      TransferTicketDetail[]
+  trackingLogs TransferTrackingLog[]
+  aiAlerts     AiAlert[]
+
+  @@index([sourceBranchId, status])
+  @@index([destBranchId, status])
+  @@index([status, eta])
+  @@index([status, slaDeadline])
+  @@index([createdAt])
+  @@map("transfer_ticket")
+}
+
+model TransferTicketDetail {
+  id                BigInt  @id @default(autoincrement())
+  transferTicketId  BigInt  @map("transfer_ticket_id")
+  productId         BigInt  @map("product_id")
+  qtyRequested      Int     @map("qty_requested")
+  qtyReceived       Int?    @default(0) @map("qty_received")
+  discrepancyReason String? @map("discrepancy_reason") @db.VarChar(500)
+
+  transferTicket TransferTicket @relation(fields: [transferTicketId], references: [id], onDelete: Cascade)
+  product        Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([transferTicketId])
+  @@index([productId])
+  @@map("transfer_ticket_detail")
+}
+
+model TransferTrackingLog {
+  id               BigInt   @id @default(autoincrement())
+  transferTicketId BigInt   @map("transfer_ticket_id")
+  latitude         Decimal  @db.Decimal(10, 8)
+  longitude        Decimal  @db.Decimal(11, 8)
+  speedKmh         Decimal? @map("speed_kmh") @db.Decimal(6, 2)
+  note             String?  @db.VarChar(255)
+  recordedAt       DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+
+  transferTicket TransferTicket @relation(fields: [transferTicketId], references: [id], onDelete: Cascade)
+
+  @@index([transferTicketId, recordedAt])
+  @@map("transfer_tracking_log")
+}
+
+model StockCheck {
+  id           BigInt           @id @default(autoincrement())
+  code         String           @unique @db.VarChar(50)
+  branchId     BigInt           @map("branch_id")
+  status       StockCheckStatus @default(COUNTING)
+  createdBy    BigInt           @map("created_by")
+  approvedBy   BigInt?          @map("approved_by")
+  rejectReason String?          @map("reject_reason") @db.VarChar(500)
+  evidenceUrls Json?            @map("evidence_urls") @db.JsonB
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branch   Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  creator  User               @relation("StockCheckCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  approver User?              @relation("StockCheckApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
+  details  StockCheckDetail[]
+
+  @@index([branchId, status, createdAt])
+  @@map("stock_check")
+}
+
+model StockCheckDetail {
+  id             BigInt  @id @default(autoincrement())
+  stockCheckId   BigInt  @map("stock_check_id")
+  productId      BigInt  @map("product_id")
+  binId          BigInt  @map("bin_id")
+  qtySystem      Int     @map("qty_system")
+  qtyActual      Int     @map("qty_actual")
+  discrepancyQty Int     @default(0) @map("discrepancy_qty")
+  reason         String? @db.VarChar(500)
+
+  stockCheck StockCheck @relation(fields: [stockCheckId], references: [id], onDelete: Cascade)
+  product    Product    @relation(fields: [productId], references: [id], onDelete: Restrict)
+  bin        Bin        @relation(fields: [binId], references: [id], onDelete: Restrict)
+
+  @@index([stockCheckId])
+  @@index([productId])
+  @@map("stock_check_detail")
+}
+
+// ==========================================
+// PHÂN HỆ ĐƠN HÀNG BÁN LẺ, AUDIT & AI ALERTS
+// ==========================================
+
+model CustomerOrder {
+  id               BigInt      @id @default(autoincrement())
+  code             String      @unique @db.VarChar(50)
+  channel          String      @default("WEBSITE") @db.VarChar(50)
+  customerName     String      @map("customer_name") @db.VarChar(150)
+  customerAddress  String      @map("customer_address") @db.VarChar(500)
+  lat              Decimal?    @db.Decimal(10, 8)
+  lng              Decimal?    @db.Decimal(11, 8)
+  assignedBranchId BigInt?     @map("assigned_branch_id")
+  status           OrderStatus @default(NEW)
+  trackingNumber   String?     @map("tracking_number") @db.VarChar(100)
+  carrierName      String?     @map("carrier_name") @db.VarChar(100)
+  pickingProgress  Int         @default(0) @map("picking_progress")
+  totalAmount      Decimal     @default(0) @map("total_amount") @db.Decimal(15, 2)
+  slaDeadline      DateTime?   @map("sla_deadline") @db.Timestamptz(6)
+  packedAt         DateTime?   @map("packed_at") @db.Timestamptz(6)
+  handedOverAt     DateTime?   @map("handed_over_at") @db.Timestamptz(6)
+  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  assignedBranch Branch?               @relation(fields: [assignedBranchId], references: [id], onDelete: SetNull)
+  details        CustomerOrderDetail[]
+  aiAlerts       AiAlert[]
+
+  @@index([assignedBranchId, status])
+  @@index([status, slaDeadline, createdAt])
+  @@map("customer_order")
+}
+
+model CustomerOrderDetail {
+  id        BigInt  @id @default(autoincrement())
+  orderId   BigInt  @map("order_id")
+  productId BigInt  @map("product_id")
+  qty       Int
+  price     Decimal @db.Decimal(15, 2)
+
+  order   CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("customer_order_detail")
+}
+
+model SystemAuditLog {
+  id         BigInt          @id @default(autoincrement())
+  userId     BigInt?         @map("user_id")
+  actionType AuditActionType @map("action_type")
+  module     String          @db.VarChar(100)
+  oldData    Json?           @map("old_data") @db.JsonB
+  newData    Json?           @map("new_data") @db.JsonB
+  ipAddress  String?         @map("ip_address") @db.VarChar(45)
+  createdAt  DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([module, actionType, createdAt])
+  @@map("system_audit_log")
+}
+
+model AiAlert {
+  id               BigInt        @id @default(autoincrement())
+  alertType        AlertType     @map("alert_type")
+  severity         AlertSeverity @default(MEDIUM)
+  branchId         BigInt?       @map("branch_id")
+  productId        BigInt?       @map("product_id")
+  transferTicketId BigInt?       @map("transfer_ticket_id")
+  orderId          BigInt?       @map("order_id")
+  title            String        @db.VarChar(255)
+  message          String        @db.Text
+  payload          Json?         @db.JsonB
+  isResolved       Boolean       @default(false) @map("is_resolved")
+  resolvedBy       BigInt?       @map("resolved_by")
+  resolvedAt       DateTime?     @map("resolved_at") @db.Timestamptz(6)
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  branch         Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  product        Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
+  transferTicket TransferTicket? @relation(fields: [transferTicketId], references: [id], onDelete: SetNull)
+  order          CustomerOrder?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  resolver       User?           @relation(fields: [resolvedBy], references: [id], onDelete: SetNull)
+
+  @@index([isResolved, severity, createdAt])
+  @@index([branchId, isResolved])
+  @@index([alertType, isResolved])
+  @@map("ai_alert")
+}

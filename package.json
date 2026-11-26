@@ -1,0 +1,33 @@
+{
+  "name": "project-cs445-root",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Full-stack Monorepo Template (Next.js + Express + Prisma + PostgreSQL + Redis)",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:backend": "npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "type-check:backend": "npm --prefix backend run type-check",
+    "type-check:frontend": "npm --prefix frontend run type-check",
+    "type-check": "npm run type-check:backend && npm run type-check:frontend"
+  },
+  "keywords": [
+    "nextjs",
+    "express",
+    "typescript",
+    "prisma",
+    "postgresql",
+    "redis"
+  ],
+  "author": "",
+  "license": "ISC"
+}
